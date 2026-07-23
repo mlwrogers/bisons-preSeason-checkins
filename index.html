@@ -612,9 +612,9 @@ function render() {
     return;
   }
 
-  // Dashboard — header, a Training/Leaderboard toggle, then the active tab.
+  // Dashboard — header, a full-width sticky Training/Leaderboard nav, then the tab.
   const tabBtn = (id, key, label) =>
-    `<button id="${id}" class="flex-1 py-2.5 text-sm font-semibold" style="background:${tab === key ? "#0F1E3D" : "transparent"};color:${tab === key ? "#fff" : "#5A6478"}">${label}</button>`;
+    `<button id="${id}" class="flex-1 py-3 text-sm font-semibold text-center" style="color:${tab === key ? "#0F1E3D" : "#8B93A3"};border-bottom:3px solid ${tab === key ? "#0F1E3D" : "transparent"}">${label}</button>`;
 
   app.innerHTML = `
     ${netBannerHTML()}
@@ -630,12 +630,14 @@ function render() {
       </div>
     </div>
 
-    <div class="max-w-md mx-auto px-5 -mt-4">
-      <div class="flex rounded-xl overflow-hidden mb-4 shadow-sm" style="background:#fff;border:1px solid #DCE1EA">
+    <div class="shadow-sm" style="position:sticky;top:0;z-index:20;background:#fff;border-bottom:1px solid #DCE1EA">
+      <div class="max-w-md mx-auto flex">
         ${tabBtn("tabTrainingBtn", "training", "My Training")}
         ${tabBtn("tabBoardBtn", "board", "Leaderboard")}
       </div>
+    </div>
 
+    <div class="max-w-md mx-auto px-5 pt-4">
       ${tab === "board" ? boardViewHTML() : trainingViewHTML()}
     </div>
     ${ehFooterHTML()}`;

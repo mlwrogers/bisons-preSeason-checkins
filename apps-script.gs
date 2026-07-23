@@ -99,7 +99,12 @@ function hashPin(playerId, pin) {
     getPepper() + '|' + playerId + '|' + String(pin),
     Utilities.Charset.UTF_8
   );
-  return Utilities.base64Encode(raw);
+  // The 'h1:' prefix guarantees the stored cell always begins with a letter, so
+  // Google Sheets can never coerce it into a formula/number on write. Without
+  // this, a base64 hash starting with '+', '-' or '=' would be mangled on the
+  // way into the sheet and fail to match on the next login. Compare & store both
+  // go through here, so the prefix is symmetric.
+  return 'h1:' + Utilities.base64Encode(raw);
 }
 
 /* ---------- Data access -------------------------------------------------- */
