@@ -304,6 +304,30 @@ function sessionCardHTML(session, playerId, opts) {
   </div>`;
 }
 
+// White club brand bar (crest reads best on light — its navy ring blends on
+// navy). Mirrors the club website: crest + wordmark, red underline accent.
+function brandBarHTML() {
+  return `
+    <div style="background:#fff;border-bottom:3px solid #C8102E">
+      <div class="max-w-md mx-auto px-5 py-3 flex items-center gap-3">
+        <img src="bisons-logo.png" alt="Birmingham Bisons Handball Club crest" width="46" height="46" style="display:block;flex-shrink:0" />
+        <div style="line-height:1.05">
+          <p class="display" style="font-size:1.15rem;color:#0F1E3D;letter-spacing:0.01em">BIRMINGHAM BISONS</p>
+          <p class="text-xs" style="color:#5A6478;margin-top:2px">Handball Club</p>
+        </div>
+      </div>
+    </div>`;
+}
+
+// England Handball affiliation mark — pink wordmark on the light page footer.
+function ehFooterHTML() {
+  return `
+    <div class="max-w-md mx-auto px-5 pb-8 pt-4 text-center">
+      <p class="text-xs uppercase tracking-[0.15em]" style="color:#9AA4BC">Affiliated to</p>
+      <img src="england-handball-logo.png" alt="England Handball" style="max-width:150px;width:100%;height:auto;margin:8px auto 0;display:block" />
+    </div>`;
+}
+
 // Connection-problem banner, shown above whatever view is active. Retry just
 // re-pulls state (which clears netError on success).
 function netBannerHTML() {
@@ -336,9 +360,10 @@ function render() {
   if (view === "login") {
     app.innerHTML = `
       ${netBannerHTML()}
+      ${brandBarHTML()}
       <div class="relative overflow-hidden px-5 pt-8 pb-10" style="background:#0F1E3D">
         <div class="relative max-w-md mx-auto">
-          <p class="text-xs tracking-[0.2em] uppercase mb-1 mono" style="color:#C8102E">Bisons Summer Training</p>
+          <p class="text-xs tracking-[0.2em] uppercase mb-1 mono" style="color:#D9A441">Summer Training Programme</p>
           <h1 class="display leading-none" style="font-size:2.3rem;color:#fff;letter-spacing:-0.01em">SESSION CHECK-IN</h1>
           <p class="mt-1 text-sm" style="color:#9AA4BC">9 sessions · 5 weeks · arrive ready for the camp</p>
         </div>
@@ -363,7 +388,8 @@ function render() {
 
           <button type="submit" ${submitting ? "disabled" : ""} class="w-full py-3 rounded-lg font-bold text-white display" style="background:#0F1E3D;font-size:1.1rem">${submitting ? "..." : "CONTINUE"}</button>
         </form>
-      </div>`;
+      </div>
+      ${ehFooterHTML()}`;
 
     document.getElementById("loginForm").addEventListener("submit", handleLogin);
     document.getElementById("nameInput").addEventListener("input", e => form.name = e.target.value);
@@ -391,10 +417,11 @@ function render() {
 
   app.innerHTML = `
     ${netBannerHTML()}
+    ${brandBarHTML()}
     <div class="relative overflow-hidden px-5 pt-8 pb-8" style="background:#0F1E3D">
       <div class="relative max-w-md mx-auto flex items-center justify-between">
         <div>
-          <p class="text-xs tracking-[0.2em] uppercase mb-1 mono" style="color:#C8102E">Bisons Summer Training</p>
+          <p class="text-xs tracking-[0.2em] uppercase mb-1 mono" style="color:#D9A441">Summer Training Programme</p>
           <h1 class="display leading-none" style="font-size:1.8rem;color:#fff">${esc(currentPlayer.name)}</h1>
           <p class="text-xs mt-0.5" style="color:#9AA4BC">${esc(currentPlayer.team)}</p>
         </div>
@@ -454,7 +481,8 @@ function render() {
               ${leaderboardListHTML(g.rows, currentPlayer.id)}
             </div>`).join("")}
       </div>
-    </div>`;
+    </div>
+    ${ehFooterHTML()}`;
 
   document.getElementById("logoutBtn").addEventListener("click", logout);
   document.getElementById("boardTeamBtn").addEventListener("click", () => { board = "team"; render(); });
