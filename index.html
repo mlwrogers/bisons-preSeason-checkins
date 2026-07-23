@@ -147,6 +147,7 @@ let submitting = false;
 let form = { name: "", team: TEAMS[0], pin: "" };
 let lastActivity = Date.now();
 let expandedIds = new Set(); // which session cards are expanded
+let expandedWeeks = new Set(); // which weeks are expanded in the full-programme accordion
 let netError = ""; // connection problem message shown as a top banner (with Retry)
 
 // Never throws: returns the parsed JSON, or an { error } object on
@@ -472,12 +473,35 @@ function trainingViewHTML() {
            <p class="text-sm mt-1" style="color:#9AA4BC">${TRAINING_CAMP_LABEL}</p>
          </div>`}
 
-    <p class="text-xs font-semibold uppercase tracking-wide mt-5 mb-2" style="color:#5A6478">Full programme</p>
-    ${weeks.map(w => `
-      <p class="text-xs font-bold mt-3 mb-1 display" style="color:#0F1E3D">WEEK ${w}</p>
-      ${SESSIONS.filter(s => s.week === w).map(s => sessionCardHTML(s, currentPlayer.id)).join("")}
-    `).join("")}
-    <p class="text-center text-xs mt-2 mb-2" style="color:#5A6478">${TRAINING_CAMP_LABEL}</p>`;
+    <p class="text-xs font-semibold uppercase tracking-wide mt-5 mb-2" style="color:#5A6478">Full programme <span style="color:#8B93A3;text-transform:none;letter-spacing:0">· tap a week to see its sessions</span></p>
+    ${weeks.map(w => {
+      const weekSessions = SESSIONS.filter(s => s.week === w);
+      const total = weekSessions.length;
+      const doneCount = weekSessions.filter(s => done.has(s.id)).length;
+      const complete = doneCount === total;
+      const range = weekSessions[0] ? weekSessions[0].dateLabel : "";
+      const wExpanded = expandedWeeks.has(w);
+      const pill = complete
+        ? { bg: "#E9F3EC", color: "#2F7A4C", text: `✓ ${doneCount}/${total}` }
+        : doneCount > 0
+          ? { bg: "#FBF1D9", color: "#8A6D1F", text: `${doneCount}/${total}` }
+          : { bg: "#F4F6F9", color: "#8B93A3", text: `0/${total}` };
+      return `
+        <div class="rounded-2xl mb-2 cursor-pointer week-toggle" data-week="${w}" style="background:#fff;border:1px solid #DCE1EA">
+          <div class="px-4 py-3 flex items-center justify-between">
+            <div>
+              <p class="display" style="font-size:1.05rem;color:${complete ? "#2F7A4C" : "#0F1E3D"}">WEEK ${w}</p>
+              <p class="text-xs mt-0.5" style="color:#8B93A3">${range}</p>
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="text-xs font-semibold mono px-2 py-1 rounded-full" style="background:${pill.bg};color:${pill.color}">${pill.text}</span>
+              <span style="color:#8B93A3">${wExpanded ? "▲" : "▼"}</span>
+            </div>
+          </div>
+        </div>
+        ${wExpanded ? `<div class="mb-2">${weekSessions.map(s => sessionCardHTML(s, currentPlayer.id)).join("")}</div>` : ""}`;
+    }).join("")}
+    <p class="text-center text-xs mt-3 mb-2" style="color:#5A6478">${TRAINING_CAMP_LABEL}</p>`;
 }
 
 // "Leaderboard" tab: personal standing, team battle, squad progress, full board.
@@ -651,11 +675,22 @@ function render() {
   document.getElementById("boardCombinedBtn")?.addEventListener("click", () => { board = "combined"; render(); });
   document.getElementById("refreshBtn")?.addEventListener("click", async () => { await loadState(); });
 
+  document.querySelectorAll(".week-toggle").forEach(el => {
+    el.addEventListener("click", () => {
+      const y = window.scrollY;
+      const w = Number(el.getAttribute("data-week"));
+      if (expandedWeeks.has(w)) expandedWeeks.delete(w); else expandedWeeks.add(w);
+      render();
+      window.scrollTo(0, y); // keep the tapped week where it is (render rebuilds the DOM)
+    });
+  });
   document.querySelectorAll(".session-toggle").forEach(el => {
     el.addEventListener("click", () => {
+      const y = window.scrollY;
       const id = el.getAttribute("data-id");
       if (expandedIds.has(id)) expandedIds.delete(id); else expandedIds.add(id);
       render();
+      window.scrollTo(0, y);
     });
   });
   document.querySelectorAll(".session-complete-btn").forEach(el => {
