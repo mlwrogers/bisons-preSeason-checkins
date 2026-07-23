@@ -1,0 +1,500 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Bisons Summer Training Check-In</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;800;900&family=Karla:wght@400;500;700&family=IBM+Plex+Mono:wght@500;600&display=swap" />
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="config.js"></script>
+
+<style>
+  body { font-family: 'Karla', sans-serif; background:#F2F4F7; color:#0F1E3D; margin:0; }
+  .display { font-family:'Big Shoulders Display', sans-serif; font-weight:800; }
+  .mono { font-family:'IBM Plex Mono', monospace; }
+  input:focus, select:focus, button:focus { outline: 2px solid #0F1E3D; outline-offset: 2px; }
+</style>
+</head>
+<body>
+
+<div id="app"></div>
+
+<script>
+/* =======================================================================
+   SETUP
+   =======================================================================
+   1. Set up the Google Sheet + Apps Script backend (see apps-script.gs).
+   2. Paste the Web app URL you get from deploying it below.
+   3. Adjust TEAMS to match your actual squads/age groups.
+   ======================================================================= */
+
+// URL comes from config.js (edit it there). Falls back to a placeholder so the
+// "set your URL" message shows if config.js is missing or wasn't filled in.
+const WEB_APP_URL = (window.APP_CONFIG && window.APP_CONFIG.WEB_APP_URL) || "PASTE_YOUR_WEB_APP_URL";
+const APP_TOKEN = (window.APP_CONFIG && window.APP_CONFIG.APP_TOKEN) || "";
+const INACTIVITY_TIMEOUT_MS = 10 * 60 * 1000; // log back out to PIN screen after this long idle
+const REQUEST_TIMEOUT_MS = 12 * 1000; // give up on a request after this and show a retry
+
+const TEAMS = ["Adult Men", "Adult Women", "U16 Boys & Girls", "U14 Boys & Girls"];
+
+// Escape user-controlled strings before putting them in innerHTML. Player names
+// are self-chosen and shown on a shared leaderboard, so this is what stops a
+// name like `<img src=x onerror=...>` running as script in teammates' browsers.
+function esc(s) {
+  return String(s == null ? "" : s).replace(/[&<>"']/g, c => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+  }[c]));
+}
+
+const TRAINING_CAMP_LABEL = "Training camp · Saturday 5 September 2026";
+
+// type: 'high' = red (speed/conditioning), 'moderate' = navy (aerobic + strength), 'low' = green (transition)
+const SESSIONS = [
+  { id: "s1", week: 1, num: 1, title: "Speed & Conditioning – Reintroduction", type: "high", dateLabel: "3–9 Aug 2026", blocks: [
+    { title: "Warm-up", duration: "10 min", items: ["3 min easy jog", "Mobility (hips, ankles)", "3 x 20m progressive runs", "2 x shuttle runs (10–20m)"] },
+    { title: "Repeat sprints", duration: "20 min", items: ["6 x 20m sprint, walk back recovery", "2 sets", "Rest 2 min between sets"] },
+    { title: "Finisher", duration: "10 min", items: ["15 sec fast / 15 sec easy x20"] },
+    { title: "Cool down", duration: "5 min", items: ["Light jog & stretch"] }
+  ]},
+  { id: "s2", week: 1, num: 2, title: "Aerobic Base + Strength", type: "moderate", dateLabel: "3–9 Aug 2026", blocks: [
+    { title: "Warm-up", duration: "5 min", items: ["Easy jog + mobility"] },
+    { title: "Aerobic", duration: "20 min", items: ["20 min easy continuous run"] },
+    { title: "Strength circuit", duration: "15 min · 2 rounds", items: ["10 squats", "8 lunges (each leg)", "10 calf raises", "20 sec plank", "10 glute bridges"] },
+    { title: "Cool down", duration: "5 min", items: ["Stretch"] }
+  ]},
+  { id: "s3", week: 2, num: 3, title: "Speed & Conditioning – Build Volume", type: "high", dateLabel: "10–16 Aug 2026", blocks: [
+    { title: "Warm-up", duration: "10 min", items: ["Same as Session 1"] },
+    { title: "Repeat sprints", duration: "20 min", items: ["8 x 20m sprint, walk back recovery", "2–3 sets", "Rest 90 sec between sets"] },
+    { title: "Finisher", duration: "10 min", items: ["30 sec fast / 30 sec easy x10"] },
+    { title: "Cool down", duration: "5 min", items: ["Light jog & stretch"] }
+  ]},
+  { id: "s4", week: 2, num: 4, title: "Aerobic Progression + Strength", type: "moderate", dateLabel: "10–16 Aug 2026", blocks: [
+    { title: "Warm-up", duration: "5 min", items: ["Easy jog + mobility"] },
+    { title: "Aerobic", duration: "25 min", items: ["25 min steady run"] },
+    { title: "Strength circuit", duration: "12–15 min · 2–3 rounds", items: ["10 squats", "8 lunges (each leg)", "12 calf raises", "25 sec plank", "10 glute bridges"] },
+    { title: "Cool down", duration: "3–5 min", items: ["Stretch"] }
+  ]},
+  { id: "s5", week: 3, num: 5, title: "Speed & Conditioning – High Intensity", type: "high", dateLabel: "17–23 Aug 2026", blocks: [
+    { title: "Warm-up", duration: "10 min", items: ["Same as Session 1"] },
+    { title: "Repeat sprints", duration: "20 min", items: ["10 x 20m sprint, walk back recovery", "3 sets", "Rest 75 sec between sets"] },
+    { title: "Finisher", duration: "10 min", items: ["15 sec fast / 15 sec easy x20"] },
+    { title: "Cool down", duration: "5 min", items: ["Light jog & stretch"] }
+  ]},
+  { id: "s6", week: 3, num: 6, title: "Interval Aerobic + Strength", type: "moderate", dateLabel: "17–23 Aug 2026", blocks: [
+    { title: "Warm-up", duration: "5 min", items: ["Easy jog + mobility"] },
+    { title: "Interval run", duration: "26 min", items: ["3 x 8 min steady run", "1 min rest between sets"] },
+    { title: "Strength circuit", duration: "11–15 min · 2 rounds", items: ["8 jump squats", "10 walking lunges", "12 single-leg calf raises", "30 sec plank", "8 single-leg RDL (each leg)"] },
+    { title: "Cool down", duration: "5 min", items: ["Stretch"] }
+  ]},
+  { id: "s7", week: 4, num: 7, title: "Speed & Conditioning – Match Specific", type: "high", dateLabel: "24–30 Aug 2026", blocks: [
+    { title: "Warm-up", duration: "10 min", items: ["Same as Session 1"] },
+    { title: "Explosive change of direction sprints", duration: "20 min", items: ["10m out + change direction + 10m back", "10 reps per set, 3 sets", "60 sec rest between reps, 90 sec between sets", "How to: sprint 10m out, plant outside foot, change direction, sprint 10m back"] },
+    { title: "Finisher", duration: "10 min", items: ["30 sec fast / 30 sec easy x10"] },
+    { title: "Cool down", duration: "5 min", items: ["Light jog & stretch"] }
+  ]},
+  { id: "s8", week: 4, num: 8, title: "Peak Aerobic + Strength", type: "moderate", dateLabel: "24–30 Aug 2026", blocks: [
+    { title: "Warm-up", duration: "5 min", items: ["Easy jog + mobility"] },
+    { title: "Interval run", duration: "19 min", items: ["4 x 4 min steady run", "1 min rest between"] },
+    { title: "Strength circuit", duration: "16 min · 3 rounds", items: ["8 jump squats", "10 walking lunges", "12 single-leg calf raises", "30 sec plank", "8 single-leg RDL (each leg)", "10 burpees", "10 lateral bounds (each side)"] },
+    { title: "Cool down", duration: "5 min", items: ["Stretch"] }
+  ]},
+  { id: "s9", week: 5, num: 9, title: "Transition / Freshen Up", type: "low", dateLabel: "31 Aug–4 Sept 2026", blocks: [
+    { title: "Warm-up", duration: "10 min", items: ["Easy jog", "Dynamic mobility", "3 x 20m progressive runs"] },
+    { title: "Activation circuit", duration: "10 min · 2 rounds", items: ["Glute bridges", "Single-leg RDLs (20 each side)", "Side planks (20 each side)", "Bird dogs (each side)", "Bodyweight squats"] },
+    { title: "Speed sharpness", duration: "10 min", items: ["6 x 15m accelerations, 85–90% effort", "Full walk-back recovery"] },
+    { title: "Mobility", duration: "10 min", items: ["Hold each stretch 30–40 sec: hip flexors, hamstrings, calves, adductors, thoracic rotation, shoulders"] },
+    { title: "Cool down", duration: "5 min", items: ["Easy walk & stretch"] }
+  ]}
+];
+
+const TYPE_STYLE = {
+  high:     { label: "High intensity",     color: "#C8102E" },
+  moderate: { label: "Moderate intensity", color: "#0F1E3D" },
+  low:      { label: "Low intensity",      color: "#2F7A4C" }
+};
+
+// ---------------------------------------------------------------------
+
+let state = { players: [], checkins: [] };
+let currentPlayer = null;
+let view = "login";
+let board = "team";
+let error = "";
+let loading = true;
+let submitting = false;
+let form = { name: "", team: TEAMS[0], pin: "" };
+let lastActivity = Date.now();
+let expandedIds = new Set(); // which session cards are expanded
+let netError = ""; // connection problem message shown as a top banner (with Retry)
+
+// Never throws: returns the parsed JSON, or an { error } object on
+// timeout / network failure / bad response, so every caller can just read
+// `res.error` uniformly.
+async function api(params) {
+  const url = new URL(WEB_APP_URL);
+  Object.keys(params).forEach(k => url.searchParams.set(k, params[k]));
+  if (APP_TOKEN) url.searchParams.set("token", APP_TOKEN);
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    const res = await fetch(url.toString(), { signal: controller.signal });
+    if (!res.ok) return { error: `Server error (${res.status}). Please try again.` };
+    return await res.json();
+  } catch (e) {
+    if (navigator.onLine === false) return { error: "You appear to be offline." };
+    return { error: "Couldn't reach the server. Check your connection and tap Retry." };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function loadState() {
+  const data = await api({ action: "getState" });
+  if (data.error) { netError = data.error; render(); return; }
+  netError = "";
+  state = data;
+  render();
+}
+
+function doneSet(playerId) {
+  return new Set(state.checkins.filter(c => c.playerId === playerId).map(c => c.sessionId));
+}
+
+function computeStreak(playerId) {
+  const done = doneSet(playerId);
+  let maxDoneNum = 0;
+  SESSIONS.forEach(s => { if (done.has(s.id)) maxDoneNum = Math.max(maxDoneNum, s.num); });
+  if (maxDoneNum === 0) return 0;
+  let streak = 0;
+  for (let n = maxDoneNum; n >= 1; n--) {
+    const s = SESSIONS.find(x => x.num === n);
+    if (s && done.has(s.id)) streak++; else break;
+  }
+  return streak;
+}
+
+function teamFullSquadForSession(team, sessionId) {
+  const roster = state.players.filter(p => p.team === team);
+  if (roster.length === 0) return false;
+  return roster.every(p => state.checkins.some(c => c.playerId === p.id && c.sessionId === sessionId));
+}
+
+function playerCompletedWeek(playerId, week, team) {
+  const weekSessions = SESSIONS.filter(s => s.week === week);
+  const done = doneSet(playerId);
+  return weekSessions.length > 0 && weekSessions.every(s => done.has(s.id));
+}
+
+function computeTotalPoints(player) {
+  const done = doneSet(player.id);
+  let points = done.size * 10;
+  points += Math.max(0, computeStreak(player.id) - 1) * 2;
+  done.forEach(sid => { if (teamFullSquadForSession(player.team, sid)) points += 5; });
+  const weeksWithSessions = [...new Set(SESSIONS.map(s => s.week))];
+  weeksWithSessions.forEach(w => { if (playerCompletedWeek(player.id, w)) points += 5; });
+  return points;
+}
+
+function nextSessionFor(playerId) {
+  const done = doneSet(playerId);
+  return SESSIONS.find(s => !done.has(s.id)) || null;
+}
+
+function goalArcSVG(progress, color) {
+  const size = 110, strokeWidth = 9;
+  const r = size / 2 - strokeWidth, cx = size / 2, cy = size - strokeWidth;
+  const path = `M ${cx - r} ${cy} A ${r} ${r} 0 0 1 ${cx + r} ${cy}`;
+  const circumference = Math.PI * r;
+  const dash = circumference * Math.min(1, Math.max(0, progress));
+  return `<svg width="${size}" height="${size/1.6}" viewBox="0 0 ${size} ${size/1.6}">
+    <path d="${path}" fill="none" stroke="#D9DEE6" stroke-width="${strokeWidth}" stroke-linecap="round"/>
+    <path d="${path}" fill="none" stroke="${color}" stroke-width="${strokeWidth}" stroke-linecap="round"
+      stroke-dasharray="${dash} ${circumference}" style="transition: stroke-dasharray 0.6s ease"/>
+  </svg>`;
+}
+
+async function handleLogin(e) {
+  e.preventDefault();
+  error = "";
+  const name = form.name.trim();
+  if (!name) { error = "Enter your name."; return render(); }
+  if (!/^\d{4}$/.test(form.pin)) { error = "PIN needs to be 4 digits."; return render(); }
+
+  submitting = true; render();
+  const res = await api({ action: "login", name, team: form.team, pin: form.pin });
+  submitting = false;
+
+  if (res.error) { error = res.error; return render(); }
+  // Keep the plaintext PIN the user typed (the server only ever returns a
+  // PIN-free player object now); it's sent to authenticate check-ins/undos.
+  currentPlayer = { ...res.player, pin: form.pin };
+  view = "dashboard";
+  await loadState();
+}
+
+async function toggleSession(sessionId) {
+  if (submitting) return;
+  submitting = true; render();
+  const alreadyDone = doneSet(currentPlayer.id).has(sessionId);
+  // PIN is sent so the backend can confirm this really is this player before
+  // mutating their check-ins (player ids are public via getState).
+  const pin = currentPlayer.pin;
+  const res = alreadyDone
+    ? await api({ action: "uncheck", playerId: currentPlayer.id, sessionId, pin })
+    : await api({ action: "checkin", playerId: currentPlayer.id, sessionId, pin });
+  submitting = false;
+  if (res && res.error) { netError = res.error; render(); return; }
+  await loadState();
+}
+
+function logout() {
+  currentPlayer = null;
+  view = "login";
+  form = { name: "", team: TEAMS[0], pin: "" };
+  render();
+}
+
+function leaderboardListHTML(rows, highlightId) {
+  if (rows.length === 0) return `<p class="text-sm py-2" style="color:#8B93A3">No check-ins yet — be the first.</p>`;
+  return rows.map((r, i) => `
+    <div class="flex items-center justify-between py-2 px-2 rounded-lg mb-1" style="background:${r.id === highlightId ? '#EEF1F6' : 'transparent'}">
+      <div class="flex items-center gap-3">
+        <span class="w-6 text-center text-sm mono" style="color:${i < 3 ? '#D9A441' : '#8B93A3'}">${i + 1}</span>
+        <span class="text-sm font-medium">${esc(r.name)}</span>
+        ${r.streak > 0 ? `<span class="text-xs" style="color:#C8102E">🔥 ${r.streak}</span>` : ""}
+      </div>
+      <span class="mono font-semibold">${r.points}</span>
+    </div>`).join("");
+}
+
+function sessionBlocksHTML(session) {
+  return session.blocks.map(b => `
+    <div class="mb-3 last:mb-0">
+      <div class="flex items-baseline justify-between">
+        <p class="text-sm font-bold">${b.title}</p>
+        <p class="text-xs mono" style="color:#8B93A3">${b.duration}</p>
+      </div>
+      <ul class="text-sm mt-1 space-y-0.5" style="color:#2C3B55">
+        ${b.items.map(i => `<li>• ${i}</li>`).join("")}
+      </ul>
+    </div>`).join("");
+}
+
+function sessionCardHTML(session, playerId, opts) {
+  opts = opts || {};
+  const done = doneSet(playerId).has(session.id);
+  const expanded = expandedIds.has(session.id) || opts.forceExpanded;
+  const style = TYPE_STYLE[session.type];
+  return `
+  <div class="rounded-2xl overflow-hidden mb-3" style="background:#fff;border:1px solid #DCE1EA">
+    <div class="px-4 py-3 flex items-start justify-between cursor-pointer session-toggle" data-id="${session.id}" style="border-left:5px solid ${style.color}">
+      <div>
+        <p class="text-xs font-semibold uppercase tracking-wide mono" style="color:${style.color}">Week ${session.week} · Session ${session.num} · ${style.label}</p>
+        <p class="display" style="font-size:1.1rem;line-height:1.15">${session.title}</p>
+        <p class="text-xs mt-0.5" style="color:#8B93A3">${session.dateLabel}</p>
+      </div>
+      <span style="color:#8B93A3">${expanded ? "▲" : "▼"}</span>
+    </div>
+    ${expanded ? `<div class="px-4 pb-2 pt-1" style="border-top:1px solid #EEF0F4">${sessionBlocksHTML(session)}</div>` : ""}
+    <button class="w-full py-3 font-bold display session-complete-btn" data-id="${session.id}"
+      style="background:${done ? "#E9F3EC" : style.color};color:${done ? "#2F7A4C" : "#fff"};font-size:1rem">
+      ${done ? "✓ COMPLETED — TAP TO UNDO" : "MARK COMPLETE"}
+    </button>
+  </div>`;
+}
+
+// Connection-problem banner, shown above whatever view is active. Retry just
+// re-pulls state (which clears netError on success).
+function netBannerHTML() {
+  if (!netError) return "";
+  return `
+    <div class="px-4 py-2.5 flex items-center justify-between gap-3" style="background:#FBEAEC;color:#C8102E">
+      <span class="text-sm">${esc(netError)}</span>
+      <button id="retryBtn" class="text-xs font-semibold px-3 py-1 rounded-lg shrink-0" style="border:1px solid #C8102E">Retry</button>
+    </div>`;
+}
+
+function wireNetBanner() {
+  const btn = document.getElementById("retryBtn");
+  if (btn) btn.addEventListener("click", async () => { await loadState(); });
+}
+
+function render() {
+  const app = document.getElementById("app");
+
+  if (loading) {
+    app.innerHTML = `<div class="min-h-screen flex items-center justify-center"><p>Loading…</p></div>`;
+    return;
+  }
+
+  if (WEB_APP_URL.indexOf("PASTE_YOUR") === 0) {
+    app.innerHTML = `<div class="p-6 text-sm" style="color:#C8102E">Set WEB_APP_URL near the top of the script to your deployed Apps Script URL first.</div>`;
+    return;
+  }
+
+  if (view === "login") {
+    app.innerHTML = `
+      ${netBannerHTML()}
+      <div class="relative overflow-hidden px-5 pt-8 pb-10" style="background:#0F1E3D">
+        <div class="relative max-w-md mx-auto">
+          <p class="text-xs tracking-[0.2em] uppercase mb-1 mono" style="color:#C8102E">Bisons Summer Training</p>
+          <h1 class="display leading-none" style="font-size:2.3rem;color:#fff;letter-spacing:-0.01em">SESSION CHECK-IN</h1>
+          <p class="mt-1 text-sm" style="color:#9AA4BC">9 sessions · 5 weeks · arrive ready for the camp</p>
+        </div>
+      </div>
+      <div class="max-w-md mx-auto px-5 -mt-6">
+        <form id="loginForm" class="rounded-2xl p-5 shadow-sm" style="background:#fff;border:1px solid #DCE1EA">
+          <h2 class="display text-lg mb-1">JOIN / CHECK IN</h2>
+          <p class="text-sm mb-4" style="color:#5A6478">First time? Pick a 4-digit PIN and remember it — that's how you check in next time.</p>
+
+          <label class="block text-xs font-semibold uppercase tracking-wide mb-1" style="color:#5A6478">Name</label>
+          <input id="nameInput" value="${esc(form.name)}" class="w-full mb-3 px-3 py-2.5 rounded-lg" style="border:1px solid #DCE1EA;background:#F7F8FA" placeholder="e.g. Seb" />
+
+          <label class="block text-xs font-semibold uppercase tracking-wide mb-1" style="color:#5A6478">Team / age group</label>
+          <select id="teamInput" class="w-full mb-3 px-3 py-2.5 rounded-lg" style="border:1px solid #DCE1EA;background:#F7F8FA">
+            ${TEAMS.map(t => `<option value="${t}" ${t === form.team ? "selected" : ""}>${t}</option>`).join("")}
+          </select>
+
+          <label class="block text-xs font-semibold uppercase tracking-wide mb-1" style="color:#5A6478">4-digit PIN</label>
+          <input id="pinInput" value="${form.pin}" inputmode="numeric" class="w-full mb-4 px-3 py-2.5 rounded-lg mono tracking-[0.3em]" style="border:1px solid #DCE1EA;background:#F7F8FA" placeholder="••••" maxlength="4" />
+
+          ${error ? `<p class="text-sm mb-3 px-3 py-2 rounded-lg" style="background:#FBEAEC;color:#C8102E">${error}</p>` : ""}
+
+          <button type="submit" ${submitting ? "disabled" : ""} class="w-full py-3 rounded-lg font-bold text-white display" style="background:#0F1E3D;font-size:1.1rem">${submitting ? "..." : "CONTINUE"}</button>
+        </form>
+      </div>`;
+
+    document.getElementById("loginForm").addEventListener("submit", handleLogin);
+    document.getElementById("nameInput").addEventListener("input", e => form.name = e.target.value);
+    document.getElementById("teamInput").addEventListener("change", e => form.team = e.target.value);
+    document.getElementById("pinInput").addEventListener("input", e => form.pin = e.target.value.replace(/\D/g, "").slice(0, 4));
+    wireNetBanner();
+    return;
+  }
+
+  // Dashboard
+  const streak = computeStreak(currentPlayer.id);
+  const myPoints = computeTotalPoints(currentPlayer);
+  const done = doneSet(currentPlayer.id);
+  const next = nextSessionFor(currentPlayer.id);
+  const nextMilestone = (Math.floor(streak / 3) + 1) * 3;
+  const arcProgress = streak % 3 === 0 && streak > 0 ? 1 : (streak % 3) / 3;
+
+  const leaderboardRows = state.players.map(p => ({
+    ...p, points: computeTotalPoints(p), streak: computeStreak(p.id)
+  })).sort((a, b) => b.points - a.points);
+
+  const teamGroups = TEAMS.map(t => ({ team: t, rows: leaderboardRows.filter(r => r.team === t) })).filter(g => g.rows.length > 0);
+
+  const weeks = [1, 2, 3, 4, 5];
+
+  app.innerHTML = `
+    ${netBannerHTML()}
+    <div class="relative overflow-hidden px-5 pt-8 pb-8" style="background:#0F1E3D">
+      <div class="relative max-w-md mx-auto flex items-center justify-between">
+        <div>
+          <p class="text-xs tracking-[0.2em] uppercase mb-1 mono" style="color:#C8102E">Bisons Summer Training</p>
+          <h1 class="display leading-none" style="font-size:1.8rem;color:#fff">${esc(currentPlayer.name)}</h1>
+          <p class="text-xs mt-0.5" style="color:#9AA4BC">${esc(currentPlayer.team)}</p>
+        </div>
+        <button id="logoutBtn" class="text-xs px-3 py-2 rounded-lg" style="color:#fff;border:1px solid #33426A">Switch</button>
+      </div>
+    </div>
+
+    <div class="max-w-md mx-auto px-5 -mt-4">
+
+      <!-- Points / streak -->
+      <div class="rounded-2xl p-5 mb-4 flex items-center justify-between" style="background:#fff;border:1px solid #DCE1EA">
+        <div>
+          <p class="text-xs font-semibold uppercase tracking-wide mb-1" style="color:#5A6478">Points</p>
+          <p class="mono font-semibold" style="font-size:2rem">${myPoints}</p>
+          <p class="text-sm mt-1" style="color:#C8102E">🔥 ${streak} session streak</p>
+          <p class="text-xs mt-1" style="color:#5A6478">${done.size} / ${SESSIONS.length} sessions done</p>
+        </div>
+        <div class="text-center">
+          ${goalArcSVG(arcProgress, "#0F1E3D")}
+          <p class="text-xs -mt-2" style="color:#5A6478">next badge at ${nextMilestone}</p>
+        </div>
+      </div>
+
+      <!-- Next up -->
+      ${next
+        ? `<p class="text-xs font-semibold uppercase tracking-wide mb-2" style="color:#5A6478">Next up</p>${sessionCardHTML(next, currentPlayer.id, { forceExpanded: true })}`
+        : `<div class="rounded-2xl p-5 mb-4 text-center" style="background:#0F1E3D">
+             <p class="display" style="font-size:1.3rem;color:#fff">PROGRAMME COMPLETE 🏆</p>
+             <p class="text-sm mt-1" style="color:#9AA4BC">${TRAINING_CAMP_LABEL}</p>
+           </div>`}
+
+      <!-- Full programme -->
+      <p class="text-xs font-semibold uppercase tracking-wide mt-5 mb-2" style="color:#5A6478">Full programme</p>
+      ${weeks.map(w => `
+        <p class="text-xs font-bold mt-3 mb-1 display" style="color:#0F1E3D">WEEK ${w}</p>
+        ${SESSIONS.filter(s => s.week === w).map(s => sessionCardHTML(s, currentPlayer.id)).join("")}
+      `).join("")}
+      <p class="text-center text-xs mt-2 mb-6" style="color:#5A6478">${TRAINING_CAMP_LABEL}</p>
+
+      <!-- Leaderboard -->
+      <div class="rounded-2xl p-5 mb-8" style="background:#fff;border:1px solid #DCE1EA">
+        <div class="flex items-center justify-between mb-3">
+          <p class="font-bold display flex items-center gap-2" style="font-size:1.1rem">🏆 LEADERBOARD</p>
+          <div class="flex items-center gap-2">
+            <button id="refreshBtn" class="text-xs px-2 py-1 rounded-lg" style="color:#5A6478;border:1px solid #DCE1EA">⟳ Refresh</button>
+            <div class="flex rounded-lg overflow-hidden" style="border:1px solid #DCE1EA">
+              <button id="boardTeamBtn" class="px-3 py-1 text-xs font-semibold" style="background:${board === "team" ? "#0F1E3D" : "transparent"};color:${board === "team" ? "#fff" : "#5A6478"}">By team</button>
+              <button id="boardCombinedBtn" class="px-3 py-1 text-xs font-semibold" style="background:${board === "combined" ? "#0F1E3D" : "transparent"};color:${board === "combined" ? "#fff" : "#5A6478"}">Combined</button>
+            </div>
+          </div>
+        </div>
+        ${board === "combined"
+          ? leaderboardListHTML(leaderboardRows, currentPlayer.id)
+          : teamGroups.map(g => `
+            <div class="mb-4 last:mb-0">
+              <p class="text-xs font-semibold uppercase tracking-wide mb-1" style="color:#5A6478">${esc(g.team)}</p>
+              ${leaderboardListHTML(g.rows, currentPlayer.id)}
+            </div>`).join("")}
+      </div>
+    </div>`;
+
+  document.getElementById("logoutBtn").addEventListener("click", logout);
+  document.getElementById("boardTeamBtn").addEventListener("click", () => { board = "team"; render(); });
+  document.getElementById("boardCombinedBtn").addEventListener("click", () => { board = "combined"; render(); });
+  document.getElementById("refreshBtn").addEventListener("click", async () => { await loadState(); });
+
+  document.querySelectorAll(".session-toggle").forEach(el => {
+    el.addEventListener("click", () => {
+      const id = el.getAttribute("data-id");
+      if (expandedIds.has(id)) expandedIds.delete(id); else expandedIds.add(id);
+      render();
+    });
+  });
+  document.querySelectorAll(".session-complete-btn").forEach(el => {
+    el.addEventListener("click", (e) => {
+      e.stopPropagation();
+      toggleSession(el.getAttribute("data-id"));
+    });
+  });
+  wireNetBanner();
+}
+
+// Track activity so we can log back out to the PIN screen after a period of inactivity.
+// Re-logging in triggers a fresh loadState(), so this is also how the board gets a periodic refresh.
+["click", "keydown", "touchstart"].forEach(evt => {
+  document.addEventListener(evt, () => { lastActivity = Date.now(); });
+});
+
+setInterval(() => {
+  if (view === "dashboard" && Date.now() - lastActivity > INACTIVITY_TIMEOUT_MS) {
+    logout();
+  }
+}, 30000);
+
+// Initial load
+(async () => {
+  await loadState();
+  loading = false;
+  render();
+})();
+</script>
+</body>
+</html>
