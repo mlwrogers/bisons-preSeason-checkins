@@ -113,11 +113,33 @@ const TYPE_STYLE = {
   low:      { label: "Low intensity",      color: "#2F7A4C" }
 };
 
+// End-of-week deadlines. A session completed on or before its week's deadline
+// earns the on-time bonus; later completions still count for the base points.
+const WEEK_DEADLINE = {
+  1: new Date("2026-08-09T23:59:59"),
+  2: new Date("2026-08-16T23:59:59"),
+  3: new Date("2026-08-23T23:59:59"),
+  4: new Date("2026-08-30T23:59:59"),
+  5: new Date("2026-09-04T23:59:59")
+};
+const ON_TIME_BONUS = 3; // extra points for completing a session within its week
+
+// Streak badges — earned by consecutive sessions (in programme order). Shown on
+// the player's card and as a small icon next to their name on the leaderboard.
+const BADGES = [
+  { streak: 3, icon: "🥉", label: "On a roll" },
+  { streak: 6, icon: "🥈", label: "Locked in" },
+  { streak: 9, icon: "🥇", label: "Full house" }
+];
+function badgesEarned(streak) { return BADGES.filter(b => streak >= b.streak); }
+function topBadge(streak) { const e = badgesEarned(streak); return e.length ? e[e.length - 1] : null; }
+
 // ---------------------------------------------------------------------
 
 let state = { players: [], checkins: [] };
 let currentPlayer = null;
 let view = "login";
+let tab = "training";   // dashboard sub-view: "training" | "board"
 let board = "team";
 let error = "";
 let loading = true;
@@ -186,10 +208,28 @@ function playerCompletedWeek(playerId, week, team) {
   return weekSessions.length > 0 && weekSessions.every(s => done.has(s.id));
 }
 
+// When a given session was completed (Date), or null if not done / no timestamp
+// (older check-ins, or before the backend exposes ts — bonus just stays 0 then).
+function checkinTs(playerId, sessionId) {
+  const c = state.checkins.find(c => c.playerId === playerId && c.sessionId === sessionId);
+  return c && c.ts ? new Date(c.ts) : null;
+}
+
+function onTimeCount(playerId) {
+  let n = 0;
+  SESSIONS.forEach(s => {
+    const ts = checkinTs(playerId, s.id);
+    const deadline = WEEK_DEADLINE[s.week];
+    if (ts && deadline && ts <= deadline) n++;
+  });
+  return n;
+}
+
 function computeTotalPoints(player) {
   const done = doneSet(player.id);
   let points = done.size * 10;
-  points += Math.max(0, computeStreak(player.id) - 1) * 2;
+  points += Math.max(0, computeStreak(player.id) - 1) * 2;   // streak bonus (+2/session)
+  points += onTimeCount(player.id) * ON_TIME_BONUS;          // on-time bonus (+3/session)
   done.forEach(sid => { if (teamFullSquadForSession(player.team, sid)) points += 5; });
   const weeksWithSessions = [...new Set(SESSIONS.map(s => s.week))];
   weeksWithSessions.forEach(w => { if (playerCompletedWeek(player.id, w)) points += 5; });
@@ -264,6 +304,7 @@ function leaderboardListHTML(rows, highlightId) {
       <div class="flex items-center gap-3">
         <span class="w-6 text-center text-sm mono" style="color:${i < 3 ? '#D9A441' : '#8B93A3'}">${i + 1}</span>
         <span class="text-sm font-medium">${esc(r.name)}</span>
+        ${(() => { const b = topBadge(r.streak); return b ? `<span class="text-sm" title="${b.label} — ${r.streak} streak">${b.icon}</span>` : ""; })()}
         ${r.streak > 0 ? `<span class="text-xs" style="color:#C8102E">🔥 ${r.streak}</span>` : ""}
       </div>
       <span class="mono font-semibold">${r.points}</span>
@@ -349,6 +390,173 @@ function wireNetBanner() {
   if (btn) btn.addEventListener("click", async () => { await loadState(); });
 }
 
+// 1-based position of a player within an already points-sorted list.
+function playerRank(playerId, sortedRows) {
+  const idx = sortedRows.findIndex(r => r.id === playerId);
+  return { rank: idx >= 0 ? idx + 1 : 0, total: sortedRows.length };
+}
+
+// Teams ranked by average points per player (fair to smaller squads).
+function teamStandings(rows) {
+  return TEAMS.map(t => {
+    const tr = rows.filter(r => r.team === t);
+    const total = tr.reduce((s, r) => s + r.points, 0);
+    const count = tr.length;
+    return { team: t, total, count, avg: count ? total / count : 0 };
+  }).filter(s => s.count > 0).sort((a, b) => b.avg - a.avg);
+}
+
+function teamBattleHTML(standings) {
+  if (!standings.length) return `<p class="text-sm" style="color:#8B93A3">No teams on the board yet.</p>`;
+  const max = Math.max(...standings.map(s => s.avg), 1);
+  return standings.map((s, i) => {
+    const pct = Math.max(4, Math.round((s.avg / max) * 100));
+    const lead = i === 0 && s.avg > 0;
+    return `
+      <div class="mb-3 last:mb-0">
+        <div class="flex items-center justify-between mb-1">
+          <span class="text-sm font-medium">${lead ? "👑 " : ""}${esc(s.team)}</span>
+          <span class="text-xs mono" style="color:#5A6478">${s.avg.toFixed(1)} avg · ${s.count} player${s.count !== 1 ? "s" : ""}</span>
+        </div>
+        <div style="background:#EEF1F6;border-radius:9999px;height:10px;overflow:hidden">
+          <div style="width:${pct}%;height:100%;background:${lead ? "#D9A441" : "#0F1E3D"};border-radius:9999px;transition:width .5s ease"></div>
+        </div>
+      </div>`;
+  }).join("");
+}
+
+// "My Training" tab: points/streak/badges, next up, full programme.
+function trainingViewHTML() {
+  const streak = computeStreak(currentPlayer.id);
+  const myPoints = computeTotalPoints(currentPlayer);
+  const done = doneSet(currentPlayer.id);
+  const next = nextSessionFor(currentPlayer.id);
+  const onTime = onTimeCount(currentPlayer.id);
+  const nextMilestone = Math.min(9, (Math.floor(streak / 3) + 1) * 3);
+  const arcProgress = streak % 3 === 0 && streak > 0 ? 1 : (streak % 3) / 3;
+  const weeks = [1, 2, 3, 4, 5];
+
+  const badgeStrip = BADGES.map(b => {
+    const got = streak >= b.streak;
+    return `<div class="flex-1 text-center rounded-xl py-2" style="background:${got ? "#FBF1D9" : "#F4F6F9"};opacity:${got ? 1 : 0.55}">
+      <div class="text-xl leading-none">${b.icon}</div>
+      <div class="text-xs font-semibold mt-1" style="color:${got ? "#8A6D1F" : "#8B93A3"}">${b.label}</div>
+      <div class="text-xs" style="color:#8B93A3">${b.streak} streak</div>
+    </div>`;
+  }).join("");
+
+  return `
+    <div class="rounded-2xl p-5 mb-4" style="background:#fff;border:1px solid #DCE1EA">
+      <div class="flex items-center justify-between">
+        <div>
+          <p class="text-xs font-semibold uppercase tracking-wide mb-1" style="color:#5A6478">Points</p>
+          <p class="mono font-semibold" style="font-size:2rem">${myPoints}</p>
+          <p class="text-sm mt-1" style="color:#C8102E">🔥 ${streak} session streak</p>
+          <p class="text-xs mt-1" style="color:#5A6478">${done.size} / ${SESSIONS.length} done${onTime ? ` · ${onTime} on time` : ""}</p>
+        </div>
+        <div class="text-center">
+          ${goalArcSVG(arcProgress, "#0F1E3D")}
+          <p class="text-xs mt-2" style="color:#5A6478">${streak >= 9 ? "all badges earned 🏆" : `next badge at ${nextMilestone}`}</p>
+        </div>
+      </div>
+      <div class="flex gap-2 mt-4">${badgeStrip}</div>
+      <p class="text-xs mt-3" style="color:#8B93A3">Scoring: 10 pts a session · +${ON_TIME_BONUS} on time · +2 per streak session · +5 a full week · +5 when the whole squad does a session.</p>
+    </div>
+
+    ${next
+      ? `<p class="text-xs font-semibold uppercase tracking-wide mb-2" style="color:#5A6478">Next up</p>${sessionCardHTML(next, currentPlayer.id, { forceExpanded: true })}`
+      : `<div class="rounded-2xl p-5 mb-4 text-center" style="background:#0F1E3D">
+           <p class="display" style="font-size:1.3rem;color:#fff">PROGRAMME COMPLETE 🏆</p>
+           <p class="text-sm mt-1" style="color:#9AA4BC">${TRAINING_CAMP_LABEL}</p>
+         </div>`}
+
+    <p class="text-xs font-semibold uppercase tracking-wide mt-5 mb-2" style="color:#5A6478">Full programme</p>
+    ${weeks.map(w => `
+      <p class="text-xs font-bold mt-3 mb-1 display" style="color:#0F1E3D">WEEK ${w}</p>
+      ${SESSIONS.filter(s => s.week === w).map(s => sessionCardHTML(s, currentPlayer.id)).join("")}
+    `).join("")}
+    <p class="text-center text-xs mt-2 mb-2" style="color:#5A6478">${TRAINING_CAMP_LABEL}</p>`;
+}
+
+// "Leaderboard" tab: personal standing, team battle, squad progress, full board.
+function boardViewHTML() {
+  const rows = state.players.map(p => ({
+    ...p, points: computeTotalPoints(p), streak: computeStreak(p.id)
+  })).sort((a, b) => b.points - a.points);
+
+  const myPoints = computeTotalPoints(currentPlayer);
+  const overall = playerRank(currentPlayer.id, rows);
+  const myTeamRows = rows.filter(r => r.team === currentPlayer.team);
+  const teamRank = playerRank(currentPlayer.id, myTeamRows);
+  const standings = teamStandings(rows);
+  const teamGroups = TEAMS.map(t => ({ team: t, rows: rows.filter(r => r.team === t) })).filter(g => g.rows.length > 0);
+
+  const banked = state.checkins.length;
+  const totalPossible = state.players.length * SESSIONS.length;
+  const bankedPct = totalPossible ? Math.round((banked / totalPossible) * 100) : 0;
+  const topStreaker = rows.reduce((best, r) => (r.streak > (best ? best.streak : 0) ? r : best), null);
+
+  const standingCol = (label, rank, total) => `
+    <div class="text-center flex-1">
+      <p class="mono font-semibold" style="font-size:1.6rem;color:#0F1E3D">${rank ? "#" + rank : "–"}</p>
+      <p class="text-xs" style="color:#8B93A3">of ${total}</p>
+      <p class="text-xs font-semibold mt-1" style="color:#5A6478">${label}</p>
+    </div>`;
+
+  return `
+    <div class="rounded-2xl p-5 mb-4" style="background:#fff;border:1px solid #DCE1EA">
+      <div class="flex items-center justify-between mb-3">
+        <p class="text-xs font-semibold uppercase tracking-wide" style="color:#5A6478">Your standing</p>
+        <span class="mono font-semibold text-sm" style="color:#D9A441">${myPoints} pts</span>
+      </div>
+      <div class="flex items-start justify-between">
+        ${standingCol("Overall", overall.rank, overall.total)}
+        <div style="width:1px;background:#EEF0F4;align-self:stretch"></div>
+        ${standingCol("Your team", teamRank.rank, teamRank.total)}
+      </div>
+    </div>
+
+    <div class="rounded-2xl p-5 mb-4" style="background:#fff;border:1px solid #DCE1EA">
+      <p class="font-bold display mb-3" style="font-size:1.1rem">TEAM BATTLE</p>
+      ${teamBattleHTML(standings)}
+      <p class="text-xs mt-3" style="color:#8B93A3">Ranked by <b>average points per player</b>, so a small squad isn't penalised just for having fewer players than a big one.</p>
+    </div>
+
+    <div class="rounded-2xl p-5 mb-4" style="background:#fff;border:1px solid #DCE1EA">
+      <p class="text-xs font-semibold uppercase tracking-wide mb-2" style="color:#5A6478">Squad progress</p>
+      <div class="flex items-baseline justify-between mb-1">
+        <span class="text-sm font-medium">${banked} of ${totalPossible} sessions banked</span>
+        <span class="text-xs mono" style="color:#5A6478">${bankedPct}%</span>
+      </div>
+      <div style="background:#EEF1F6;border-radius:9999px;height:10px;overflow:hidden">
+        <div style="width:${bankedPct}%;height:100%;background:#2F7A4C;border-radius:9999px;transition:width .5s ease"></div>
+      </div>
+      ${topStreaker && topStreaker.streak > 0
+        ? `<p class="text-xs mt-3" style="color:#5A6478">Longest streak: 🔥 ${topStreaker.streak} — ${esc(topStreaker.name)}</p>`
+        : ""}
+    </div>
+
+    <div class="rounded-2xl p-5 mb-2" style="background:#fff;border:1px solid #DCE1EA">
+      <div class="flex items-center justify-between mb-3">
+        <p class="font-bold display flex items-center gap-2" style="font-size:1.1rem">🏆 LEADERBOARD</p>
+        <div class="flex items-center gap-2">
+          <button id="refreshBtn" class="text-xs px-2 py-1 rounded-lg" style="color:#5A6478;border:1px solid #DCE1EA">⟳ Refresh</button>
+          <div class="flex rounded-lg overflow-hidden" style="border:1px solid #DCE1EA">
+            <button id="boardTeamBtn" class="px-3 py-1 text-xs font-semibold" style="background:${board === "team" ? "#0F1E3D" : "transparent"};color:${board === "team" ? "#fff" : "#5A6478"}">By team</button>
+            <button id="boardCombinedBtn" class="px-3 py-1 text-xs font-semibold" style="background:${board === "combined" ? "#0F1E3D" : "transparent"};color:${board === "combined" ? "#fff" : "#5A6478"}">Combined</button>
+          </div>
+        </div>
+      </div>
+      ${board === "combined"
+        ? leaderboardListHTML(rows, currentPlayer.id)
+        : teamGroups.map(g => `
+          <div class="mb-4 last:mb-0">
+            <p class="text-xs font-semibold uppercase tracking-wide mb-1" style="color:#5A6478">${esc(g.team)}</p>
+            ${leaderboardListHTML(g.rows, currentPlayer.id)}
+          </div>`).join("")}
+    </div>`;
+}
+
 function render() {
   const app = document.getElementById("app");
 
@@ -404,21 +612,9 @@ function render() {
     return;
   }
 
-  // Dashboard
-  const streak = computeStreak(currentPlayer.id);
-  const myPoints = computeTotalPoints(currentPlayer);
-  const done = doneSet(currentPlayer.id);
-  const next = nextSessionFor(currentPlayer.id);
-  const nextMilestone = (Math.floor(streak / 3) + 1) * 3;
-  const arcProgress = streak % 3 === 0 && streak > 0 ? 1 : (streak % 3) / 3;
-
-  const leaderboardRows = state.players.map(p => ({
-    ...p, points: computeTotalPoints(p), streak: computeStreak(p.id)
-  })).sort((a, b) => b.points - a.points);
-
-  const teamGroups = TEAMS.map(t => ({ team: t, rows: leaderboardRows.filter(r => r.team === t) })).filter(g => g.rows.length > 0);
-
-  const weeks = [1, 2, 3, 4, 5];
+  // Dashboard — header, a Training/Leaderboard toggle, then the active tab.
+  const tabBtn = (id, key, label) =>
+    `<button id="${id}" class="flex-1 py-2.5 text-sm font-semibold" style="background:${tab === key ? "#0F1E3D" : "transparent"};color:${tab === key ? "#fff" : "#5A6478"}">${label}</button>`;
 
   app.innerHTML = `
     ${netBannerHTML()}
@@ -435,65 +631,21 @@ function render() {
     </div>
 
     <div class="max-w-md mx-auto px-5 -mt-4">
-
-      <!-- Points / streak -->
-      <div class="rounded-2xl p-5 mb-4 flex items-center justify-between" style="background:#fff;border:1px solid #DCE1EA">
-        <div>
-          <p class="text-xs font-semibold uppercase tracking-wide mb-1" style="color:#5A6478">Points</p>
-          <p class="mono font-semibold" style="font-size:2rem">${myPoints}</p>
-          <p class="text-sm mt-1" style="color:#C8102E">🔥 ${streak} session streak</p>
-          <p class="text-xs mt-1" style="color:#5A6478">${done.size} / ${SESSIONS.length} sessions done</p>
-          <p class="text-xs mt-2" style="color:#8B93A3">10 pts a session · streak &amp; full-week bonuses on top</p>
-        </div>
-        <div class="text-center">
-          ${goalArcSVG(arcProgress, "#0F1E3D")}
-          <p class="text-xs mt-2" style="color:#5A6478">next badge at ${nextMilestone}</p>
-        </div>
+      <div class="flex rounded-xl overflow-hidden mb-4 shadow-sm" style="background:#fff;border:1px solid #DCE1EA">
+        ${tabBtn("tabTrainingBtn", "training", "My Training")}
+        ${tabBtn("tabBoardBtn", "board", "Leaderboard")}
       </div>
 
-      <!-- Next up -->
-      ${next
-        ? `<p class="text-xs font-semibold uppercase tracking-wide mb-2" style="color:#5A6478">Next up</p>${sessionCardHTML(next, currentPlayer.id, { forceExpanded: true })}`
-        : `<div class="rounded-2xl p-5 mb-4 text-center" style="background:#0F1E3D">
-             <p class="display" style="font-size:1.3rem;color:#fff">PROGRAMME COMPLETE 🏆</p>
-             <p class="text-sm mt-1" style="color:#9AA4BC">${TRAINING_CAMP_LABEL}</p>
-           </div>`}
-
-      <!-- Full programme -->
-      <p class="text-xs font-semibold uppercase tracking-wide mt-5 mb-2" style="color:#5A6478">Full programme</p>
-      ${weeks.map(w => `
-        <p class="text-xs font-bold mt-3 mb-1 display" style="color:#0F1E3D">WEEK ${w}</p>
-        ${SESSIONS.filter(s => s.week === w).map(s => sessionCardHTML(s, currentPlayer.id)).join("")}
-      `).join("")}
-      <p class="text-center text-xs mt-2 mb-6" style="color:#5A6478">${TRAINING_CAMP_LABEL}</p>
-
-      <!-- Leaderboard -->
-      <div class="rounded-2xl p-5 mb-8" style="background:#fff;border:1px solid #DCE1EA">
-        <div class="flex items-center justify-between mb-3">
-          <p class="font-bold display flex items-center gap-2" style="font-size:1.1rem">🏆 LEADERBOARD</p>
-          <div class="flex items-center gap-2">
-            <button id="refreshBtn" class="text-xs px-2 py-1 rounded-lg" style="color:#5A6478;border:1px solid #DCE1EA">⟳ Refresh</button>
-            <div class="flex rounded-lg overflow-hidden" style="border:1px solid #DCE1EA">
-              <button id="boardTeamBtn" class="px-3 py-1 text-xs font-semibold" style="background:${board === "team" ? "#0F1E3D" : "transparent"};color:${board === "team" ? "#fff" : "#5A6478"}">By team</button>
-              <button id="boardCombinedBtn" class="px-3 py-1 text-xs font-semibold" style="background:${board === "combined" ? "#0F1E3D" : "transparent"};color:${board === "combined" ? "#fff" : "#5A6478"}">Combined</button>
-            </div>
-          </div>
-        </div>
-        ${board === "combined"
-          ? leaderboardListHTML(leaderboardRows, currentPlayer.id)
-          : teamGroups.map(g => `
-            <div class="mb-4 last:mb-0">
-              <p class="text-xs font-semibold uppercase tracking-wide mb-1" style="color:#5A6478">${esc(g.team)}</p>
-              ${leaderboardListHTML(g.rows, currentPlayer.id)}
-            </div>`).join("")}
-      </div>
+      ${tab === "board" ? boardViewHTML() : trainingViewHTML()}
     </div>
     ${ehFooterHTML()}`;
 
   document.getElementById("logoutBtn").addEventListener("click", logout);
-  document.getElementById("boardTeamBtn").addEventListener("click", () => { board = "team"; render(); });
-  document.getElementById("boardCombinedBtn").addEventListener("click", () => { board = "combined"; render(); });
-  document.getElementById("refreshBtn").addEventListener("click", async () => { await loadState(); });
+  document.getElementById("tabTrainingBtn")?.addEventListener("click", () => { tab = "training"; window.scrollTo(0, 0); render(); });
+  document.getElementById("tabBoardBtn")?.addEventListener("click", () => { tab = "board"; window.scrollTo(0, 0); render(); });
+  document.getElementById("boardTeamBtn")?.addEventListener("click", () => { board = "team"; render(); });
+  document.getElementById("boardCombinedBtn")?.addEventListener("click", () => { board = "combined"; render(); });
+  document.getElementById("refreshBtn")?.addEventListener("click", async () => { await loadState(); });
 
   document.querySelectorAll(".session-toggle").forEach(el => {
     el.addEventListener("click", () => {

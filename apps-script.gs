@@ -123,7 +123,11 @@ function publicPlayer(p) {
 function getCheckins(sheet) {
   var data = sheet.getDataRange().getValues();
   return data.slice(1).filter(function (r) { return r[0]; }).map(function (r) {
-    return { playerId: String(r[0]), sessionId: String(r[1]) };
+    // ts (ISO) lets the app award an "on-time" bonus for completing a session
+    // within its scheduled week. Not sensitive — it's the player's own action.
+    var ts = "";
+    if (r[2]) { try { ts = new Date(r[2]).toISOString(); } catch (e) { ts = ""; } }
+    return { playerId: String(r[0]), sessionId: String(r[1]), ts: ts };
   });
 }
 
