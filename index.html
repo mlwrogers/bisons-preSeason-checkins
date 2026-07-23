@@ -230,9 +230,9 @@ function computeTotalPoints(player) {
   let points = done.size * 10;
   points += Math.max(0, computeStreak(player.id) - 1) * 2;   // streak bonus (+2/session)
   points += onTimeCount(player.id) * ON_TIME_BONUS;          // on-time bonus (+3/session)
-  done.forEach(sid => { if (teamFullSquadForSession(player.team, sid)) points += 5; });
+  done.forEach(sid => { if (teamFullSquadForSession(player.team, sid)) points += 2; });  // whole-team bonus (+2/session)
   const weeksWithSessions = [...new Set(SESSIONS.map(s => s.week))];
-  weeksWithSessions.forEach(w => { if (playerCompletedWeek(player.id, w)) points += 5; });
+  weeksWithSessions.forEach(w => { if (playerCompletedWeek(player.id, w)) points += 5; });  // full-week bonus (+5/week)
   return points;
 }
 
@@ -462,7 +462,7 @@ function trainingViewHTML() {
         </div>
       </div>
       <div class="flex gap-2 mt-4">${badgeStrip}</div>
-      <p class="text-xs mt-3" style="color:#8B93A3">Scoring: 10 pts a session · +${ON_TIME_BONUS} on time · +2 per streak session · +5 a full week · +5 when the whole squad does a session.</p>
+      <p class="text-xs mt-3" style="color:#8B93A3">Scoring: 10 pts a session · +${ON_TIME_BONUS} on time · +2 per streak session · +5 a full week · +2 when your whole team does a session.</p>
     </div>
 
     ${next

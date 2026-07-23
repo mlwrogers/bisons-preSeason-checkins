@@ -35,11 +35,14 @@ Apps Script actions (all via GET with query params, not POST — required becaus
 - `SESSIONS` — hardcoded array of 9 sessions transcribed from the coach's poster (Bisons Summer Training Programme), each with warm-up/main-work/circuit/cooldown blocks, sets/reps/rest, dateLabel strings (set to Aug/Sept 2026), intensity type (`high`/`moderate`/`low` → red/navy/green, matching the poster's own colour key)
 - `INACTIVITY_TIMEOUT_MS` — 10 minutes; player is logged back to PIN screen after this idle, which forces a fresh data pull. No background polling — refresh only happens on login, own check-in/uncheck, manual refresh button, or after inactivity timeout. This was a deliberate choice to keep Apps Script request volume low.
 
-## Points system
+## Points system (computed client-side in index.html from raw check-ins — not stored)
 - 10 pts per session completed
+- +3 pts per session completed within its scheduled week ("on-time" bonus; uses the check-in timestamp + WEEK_DEADLINE map)
 - +2 pts per session for an active streak (consecutive sessions in programme order, num 1–9; a gap resets it)
-- +5 pts to everyone on a team for any session the whole registered team completes
+- +2 pts per session that the player's whole registered team completes (was +5; cut to +2 as it's uncontrollable by the individual and biased toward small teams)
 - +5 pts to a player for completing both sessions in a given week
+- Streak badges at 3/6/9 consecutive sessions (🥉/🥈/🥇), shown on the training card and next to names on the leaderboard
+- NOTE: points are re-derived live every render, so changing the formula retroactively changes standings — safe pre-launch, avoid mid-programme
 
 ## Design language
 Birmingham Bisons branding: navy (#0F1E3D) header/primary, red (#C8102E) for high-intensity/primary accents, green (#2F7A4C) for low-intensity, gold (#D9A441) for points. Fonts: Big Shoulders Display (headings), Karla (body), IBM Plex Mono (numbers). A "goal arc" SVG (semi-circle, echoing a handball 6m line) is used as the streak progress meter — the one deliberate signature visual element.
