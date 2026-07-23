@@ -2,7 +2,7 @@
 
 A simple mobile-friendly app for Birmingham Bisons players to check off their summer training sessions, track streaks, and see a team leaderboard.
 
-**Live app:** add your GitHub Pages URL here once deployed.
+**Live app:** https://mlwrogers.github.io/bisons-preSeason-checkins/
 
 ## How it works
 - Players join with their name, team, and a 4-digit PIN (no accounts, no passwords elsewhere)
