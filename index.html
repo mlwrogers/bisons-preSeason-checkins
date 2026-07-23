@@ -160,6 +160,28 @@ const EXERCISE_GUIDE = [
   { name: "Side plank", cat: "Core", how: "On one forearm, body sideways in a straight line; hold with hips lifted, then switch sides." },
   { name: "Bird dogs", cat: "Core", how: "On hands and knees, extend the opposite arm and leg level with your body; hold, keep hips square, then switch." }
 ];
+const CAT_EMOJI = { Run: "🏃", Strength: "💪", Power: "⚡", Core: "🧘" };
+
+// Quick-glance icon for a session-list item, matched by keyword. Order matters:
+// specific phrases first so "jump squat" doesn't match the generic "squat".
+const ITEM_ICONS = [
+  { kw: "jump squat", icon: "⚡" }, { kw: "burpee", icon: "⚡" },
+  { kw: "lateral bound", icon: "⚡" }, { kw: "bound", icon: "⚡" },
+  { kw: "change direction", icon: "⚡" }, { kw: "explosive", icon: "⚡" },
+  { kw: "single-leg rdl", icon: "💪" }, { kw: "rdl", icon: "💪" },
+  { kw: "glute bridge", icon: "💪" }, { kw: "squat", icon: "💪" },
+  { kw: "lunge", icon: "💪" }, { kw: "calf", icon: "💪" },
+  { kw: "side plank", icon: "🧘" }, { kw: "plank", icon: "🧘" },
+  { kw: "bird dog", icon: "🧘" }, { kw: "mobility", icon: "🧘" },
+  { kw: "stretch", icon: "🧘" }, { kw: "activation", icon: "🧘" },
+  { kw: "sprint", icon: "🏃" }, { kw: "shuttle", icon: "🏃" },
+  { kw: "acceleration", icon: "🏃" }, { kw: "run", icon: "🏃" }, { kw: "jog", icon: "🏃" }
+];
+function iconForItem(text) {
+  const t = String(text).toLowerCase();
+  const m = ITEM_ICONS.find(e => t.includes(e.kw));
+  return m ? m.icon : "";
+}
 
 // ---------------------------------------------------------------------
 
@@ -175,7 +197,6 @@ let form = { name: "", team: TEAMS[0], pin: "" };
 let lastActivity = Date.now();
 let expandedIds = new Set(); // which session cards are expanded
 let expandedWeeks = new Set(); // which weeks are expanded in the full-programme accordion
-let guideOpen = false; // exercise guide collapsed by default (keeps the view clean)
 let netError = ""; // connection problem message shown as a top banner (with Retry)
 
 // Never throws: returns the parsed JSON, or an { error } object on
@@ -348,7 +369,7 @@ function sessionBlocksHTML(session) {
         <p class="text-xs mono" style="color:#8B93A3">${b.duration}</p>
       </div>
       <ul class="text-sm mt-1 space-y-0.5" style="color:#2C3B55">
-        ${b.items.map(i => `<li>• ${i}</li>`).join("")}
+        ${b.items.map(i => { const ic = iconForItem(i); return `<li>${ic ? ic + " " : "• "}${i}</li>`; }).join("")}
       </ul>
     </div>`).join("");
 }
@@ -529,35 +550,40 @@ function trainingViewHTML() {
         </div>
         ${wExpanded ? `<div class="mb-2">${weekSessions.map(s => sessionCardHTML(s, currentPlayer.id)).join("")}</div>` : ""}`;
     }).join("")}
-
-    ${exerciseGuideHTML()}
     <p class="text-center text-xs mt-3 mb-2" style="color:#5A6478">${TRAINING_CAMP_LABEL}</p>`;
 }
 
-// Collapsed-by-default glossary so unfamiliar players can look up any movement.
-function exerciseGuideHTML() {
-  const items = EXERCISE_GUIDE.map(e => {
-    const c = CAT_STYLE[e.cat];
-    return `
-      <div class="mb-3 last:mb-0">
-        <div class="flex items-center gap-2">
-          <p class="text-sm font-bold">${e.name}</p>
-          <span class="text-xs px-2 py-0.5 rounded-full" style="background:${c.bg};color:${c.color}">${e.cat}</span>
-        </div>
-        <p class="text-sm mt-0.5" style="color:#2C3B55">${e.how}</p>
-      </div>`;
-  }).join("");
+// "Guide" tab: every movement grouped by type, each with an icon + how-to.
+function guideViewHTML() {
+  const cats = [
+    { key: "Run", label: "Running & conditioning" },
+    { key: "Strength", label: "Strength" },
+    { key: "Power", label: "Power & explosive" },
+    { key: "Core", label: "Core & stability" }
+  ];
   return `
-    <div class="rounded-2xl mt-4 mb-2" style="background:#fff;border:1px solid #DCE1EA">
-      <div id="guideToggle" class="px-4 py-3 flex items-center justify-between cursor-pointer">
-        <div>
-          <p class="display" style="font-size:1.05rem;color:#0F1E3D">EXERCISE GUIDE</p>
-          <p class="text-xs mt-0.5" style="color:#8B93A3">New to a move? Quick how-tos</p>
-        </div>
-        <span style="color:#8B93A3">${guideOpen ? "▲" : "▼"}</span>
-      </div>
-      ${guideOpen ? `<div class="px-4 pb-4 pt-1" style="border-top:1px solid #EEF0F4">${items}</div>` : ""}
-    </div>`;
+    <div class="rounded-2xl p-5 mb-4" style="background:#fff;border:1px solid #DCE1EA">
+      <p class="font-bold display" style="font-size:1.2rem">EXERCISE GUIDE</p>
+      <p class="text-sm mt-1" style="color:#5A6478">Not sure about a move in your session? Here's how each one works. The same icons appear next to exercises in your sessions.</p>
+    </div>
+    ${cats.map(cat => {
+      const list = EXERCISE_GUIDE.filter(e => e.cat === cat.key);
+      if (!list.length) return "";
+      const c = CAT_STYLE[cat.key];
+      return `
+        <p class="text-xs font-semibold uppercase tracking-wide mt-4 mb-2" style="color:${c.color}">${CAT_EMOJI[cat.key]} ${cat.label}</p>
+        <div class="rounded-2xl p-5 mb-2" style="background:#fff;border:1px solid #DCE1EA">
+          ${list.map(e => `
+            <div class="mb-3 last:mb-0 flex gap-3">
+              <span class="text-lg leading-none" style="flex-shrink:0">${CAT_EMOJI[cat.key]}</span>
+              <div>
+                <p class="text-sm font-bold">${e.name}</p>
+                <p class="text-sm mt-0.5" style="color:#2C3B55">${e.how}</p>
+              </div>
+            </div>`).join("")}
+        </div>`;
+    }).join("")}
+    <p class="text-center text-xs mt-3 mb-2" style="color:#8B93A3">Listen to your body — stop if you feel pain.</p>`;
 }
 
 // "Leaderboard" tab: personal standing, team battle, squad progress, full board.
@@ -696,7 +722,7 @@ function render() {
 
   // Dashboard — header, a full-width sticky Training/Leaderboard nav, then the tab.
   const tabBtn = (id, key, label) =>
-    `<button id="${id}" class="flex-1 py-3 text-sm font-semibold text-center" style="color:${tab === key ? "#0F1E3D" : "#8B93A3"};border-bottom:3px solid ${tab === key ? "#0F1E3D" : "transparent"}">${label}</button>`;
+    `<button id="${id}" class="flex-1 py-3 text-sm font-semibold text-center whitespace-nowrap" style="color:${tab === key ? "#0F1E3D" : "#8B93A3"};border-bottom:3px solid ${tab === key ? "#0F1E3D" : "transparent"}">${label}</button>`;
 
   app.innerHTML = `
     ${netBannerHTML()}
@@ -714,29 +740,25 @@ function render() {
 
     <div class="shadow-sm" style="position:sticky;top:0;z-index:20;background:#fff;border-bottom:1px solid #DCE1EA">
       <div class="max-w-md mx-auto flex">
-        ${tabBtn("tabTrainingBtn", "training", "My Training")}
+        ${tabBtn("tabTrainingBtn", "training", "Training")}
         ${tabBtn("tabBoardBtn", "board", "Leaderboard")}
+        ${tabBtn("tabGuideBtn", "guide", "Guide")}
       </div>
     </div>
 
     <div class="max-w-md mx-auto px-5 pt-4">
-      ${tab === "board" ? boardViewHTML() : trainingViewHTML()}
+      ${tab === "board" ? boardViewHTML() : tab === "guide" ? guideViewHTML() : trainingViewHTML()}
     </div>
     ${ehFooterHTML()}`;
 
   document.getElementById("logoutBtn").addEventListener("click", logout);
   document.getElementById("tabTrainingBtn")?.addEventListener("click", () => { tab = "training"; window.scrollTo(0, 0); render(); });
   document.getElementById("tabBoardBtn")?.addEventListener("click", () => { tab = "board"; window.scrollTo(0, 0); render(); });
+  document.getElementById("tabGuideBtn")?.addEventListener("click", () => { tab = "guide"; window.scrollTo(0, 0); render(); });
   document.getElementById("boardTeamBtn")?.addEventListener("click", () => { board = "team"; render(); });
   document.getElementById("boardCombinedBtn")?.addEventListener("click", () => { board = "combined"; render(); });
   document.getElementById("refreshBtn")?.addEventListener("click", async () => { await loadState(); });
 
-  document.getElementById("guideToggle")?.addEventListener("click", () => {
-    const y = window.scrollY;
-    guideOpen = !guideOpen;
-    render();
-    window.scrollTo(0, y);
-  });
   document.querySelectorAll(".week-toggle").forEach(el => {
     el.addEventListener("click", () => {
       const y = window.scrollY;
