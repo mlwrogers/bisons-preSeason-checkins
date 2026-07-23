@@ -134,6 +134,33 @@ const BADGES = [
 function badgesEarned(streak) { return BADGES.filter(b => streak >= b.streak); }
 function topBadge(streak) { const e = badgesEarned(streak); return e.length ? e[e.length - 1] : null; }
 
+// Plain-English how-tos for every movement in the programme, for players who
+// aren't familiar with a given exercise. Shown in a collapsed-by-default guide.
+const CAT_STYLE = {
+  Run:      { bg: "#EEF1F6", color: "#0F1E3D" },
+  Strength: { bg: "#E9F3EC", color: "#2F7A4C" },
+  Power:    { bg: "#FBEAEC", color: "#C8102E" },
+  Core:     { bg: "#FBF1D9", color: "#8A6D1F" }
+};
+const EXERCISE_GUIDE = [
+  { name: "Progressive runs", cat: "Run", how: "Build speed across the distance — start easy and finish near a sprint." },
+  { name: "Shuttle runs", cat: "Run", how: "Run back and forth between two cones (~10–20m), staying continuous — don't stop at the ends." },
+  { name: "Repeat sprints", cat: "Run", how: "Near-max sprints with a walk-back recovery between each. Quality over quantity." },
+  { name: "Accelerations", cat: "Run", how: "Build from a jog up to ~85–90% over ~15m — smooth, not a standing-start max sprint." },
+  { name: "Change-of-direction sprints", cat: "Power", how: "Sprint ~10m, plant your outside foot, cut back the other way and sprint back. Sharp and explosive." },
+  { name: "Squats", cat: "Strength", how: "Feet shoulder-width; sit your hips back and down like into a chair, knees over toes; stand tall." },
+  { name: "Lunges / walking lunges", cat: "Strength", how: "Step forward and lower until both knees are ~90°, front knee over ankle; push back up. Alternate legs." },
+  { name: "Calf raises", cat: "Strength", how: "Rise onto the balls of your feet, pause at the top, lower slowly. Single-leg = one foot at a time." },
+  { name: "Glute bridges", cat: "Strength", how: "Lie on your back, knees bent, feet flat; drive your hips up and squeeze your glutes; lower slowly." },
+  { name: "Single-leg RDL", cat: "Strength", how: "Balance on one leg; hinge at the hip, lowering your chest as the free leg reaches behind you, back flat; return upright. Hamstrings + balance." },
+  { name: "Jump squats", cat: "Power", how: "A squat, then explode up into a jump; land soft and flow straight into the next rep." },
+  { name: "Lateral bounds", cat: "Power", how: "Push off one leg and jump sideways, landing softly on the other and sticking it; then bound back. Side-to-side power." },
+  { name: "Burpees", cat: "Power", how: "Squat, hands down, jump your feet back to a plank, jump them in, then jump up. Full-body." },
+  { name: "Plank", cat: "Core", how: "Hold a straight line head-to-heels on forearms and toes; brace your core, don't let your hips sag." },
+  { name: "Side plank", cat: "Core", how: "On one forearm, body sideways in a straight line; hold with hips lifted, then switch sides." },
+  { name: "Bird dogs", cat: "Core", how: "On hands and knees, extend the opposite arm and leg level with your body; hold, keep hips square, then switch." }
+];
+
 // ---------------------------------------------------------------------
 
 let state = { players: [], checkins: [] };
@@ -148,6 +175,7 @@ let form = { name: "", team: TEAMS[0], pin: "" };
 let lastActivity = Date.now();
 let expandedIds = new Set(); // which session cards are expanded
 let expandedWeeks = new Set(); // which weeks are expanded in the full-programme accordion
+let guideOpen = false; // exercise guide collapsed by default (keeps the view clean)
 let netError = ""; // connection problem message shown as a top banner (with Retry)
 
 // Never throws: returns the parsed JSON, or an { error } object on
@@ -501,7 +529,35 @@ function trainingViewHTML() {
         </div>
         ${wExpanded ? `<div class="mb-2">${weekSessions.map(s => sessionCardHTML(s, currentPlayer.id)).join("")}</div>` : ""}`;
     }).join("")}
+
+    ${exerciseGuideHTML()}
     <p class="text-center text-xs mt-3 mb-2" style="color:#5A6478">${TRAINING_CAMP_LABEL}</p>`;
+}
+
+// Collapsed-by-default glossary so unfamiliar players can look up any movement.
+function exerciseGuideHTML() {
+  const items = EXERCISE_GUIDE.map(e => {
+    const c = CAT_STYLE[e.cat];
+    return `
+      <div class="mb-3 last:mb-0">
+        <div class="flex items-center gap-2">
+          <p class="text-sm font-bold">${e.name}</p>
+          <span class="text-xs px-2 py-0.5 rounded-full" style="background:${c.bg};color:${c.color}">${e.cat}</span>
+        </div>
+        <p class="text-sm mt-0.5" style="color:#2C3B55">${e.how}</p>
+      </div>`;
+  }).join("");
+  return `
+    <div class="rounded-2xl mt-4 mb-2" style="background:#fff;border:1px solid #DCE1EA">
+      <div id="guideToggle" class="px-4 py-3 flex items-center justify-between cursor-pointer">
+        <div>
+          <p class="display" style="font-size:1.05rem;color:#0F1E3D">EXERCISE GUIDE</p>
+          <p class="text-xs mt-0.5" style="color:#8B93A3">New to a move? Quick how-tos</p>
+        </div>
+        <span style="color:#8B93A3">${guideOpen ? "▲" : "▼"}</span>
+      </div>
+      ${guideOpen ? `<div class="px-4 pb-4 pt-1" style="border-top:1px solid #EEF0F4">${items}</div>` : ""}
+    </div>`;
 }
 
 // "Leaderboard" tab: personal standing, team battle, squad progress, full board.
@@ -675,6 +731,12 @@ function render() {
   document.getElementById("boardCombinedBtn")?.addEventListener("click", () => { board = "combined"; render(); });
   document.getElementById("refreshBtn")?.addEventListener("click", async () => { await loadState(); });
 
+  document.getElementById("guideToggle")?.addEventListener("click", () => {
+    const y = window.scrollY;
+    guideOpen = !guideOpen;
+    render();
+    window.scrollTo(0, y);
+  });
   document.querySelectorAll(".week-toggle").forEach(el => {
     el.addEventListener("click", () => {
       const y = window.scrollY;
